@@ -1,4 +1,3 @@
-
 import logging, os, sys
 from infra.config import env_str, env_int, env_float
 from infra.db.postgres_repository import PostgresNotificationRepository
@@ -16,14 +15,15 @@ def main():
     timeout  = env_int("SELENIUM_TIMEOUT", 20)
     batch    = env_int("BATCH_SIZE", 50)
     pause    = env_float("PAUSE_SEC", 0.25)
+    poll     = env_float("POLL_SEC", 10.0)  # cada cuántos segundos revisar la BD
 
     repo   = PostgresNotificationRepository(db_url)
     sender = SeleniumWhatsAppSender(profile, timeout)
     job    = SendPendingNotificationsJob(repo=repo, sender=sender, batch_size=batch, pause_sec=pause)
 
+    print("Servicio iniciado: enviará SOLO 'Pendiente' con scheduled_at <= NOW().")
     try:
-        # Menú interactivo: Enviar ahora / Programar (con timer por notificación)
-        job.run_interactive_menu()
+        job.run_forever(poll)
     finally:
         try: sender.close()
         except: pass
