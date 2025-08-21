@@ -1,0 +1,4 @@
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
+selenium==4.22.0
+webdriver-manager==4.0.2

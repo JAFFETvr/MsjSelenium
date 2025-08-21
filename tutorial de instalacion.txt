@@ -1,0 +1,55 @@
+
+-Instalar dependencias necesarias
+
+-Instalar Python 3.x
+
+-Instalar Google Chrome
+
+-Instalar las librerías de Python
+Entrar a la carpeta del proyecto y ejecutar:
+
+pip install -r requirements.txt
+
+
+-Crear carpeta para el perfil de Chrome
+Ejecutar en la terminal (CMD o Git Bash):
+
+mkdir C:\Users\TU_USUARIO\whatsapp-bot-profile
+
+
+Configurar archivo .env
+Editar el archivo .env y modificar:
+DATABASE_URL=postgresql://postgres:Contraseña@localhost:5433/mensajeria_db
+CHROME_PROFILE_DIR=/c/Users/TU_USUARIO/whatsapp-bot-profile
+SELENIUM_TIMEOUT=20
+HEADLESS=true
+BATCH_SIZE=50
+PAUSE_SEC=0.5
+LOG_LEVEL=INFO
+
+
+
+-Registrar número en WhatsApp Web (solo la primera vez)
+
+Cambiar en el .env:
+
+HEADLESS=false
+
+
+Ejecutar el bot:
+
+python main.py
+
+
+Se abrirá Chrome, escanear el código QR con el celular para vincular la sesión.
+
+Activar el bot en segundo plano
+
+Una vez registrado el número, volver a cambiar en .env:
+
+HEADLESS=true
+
+
+Ejecutar de nuevo:
+
+python main.py
