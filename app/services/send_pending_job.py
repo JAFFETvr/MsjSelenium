@@ -7,10 +7,6 @@ from app.ports.whatsapp_sender import WhatsAppSender
 E164_REGEX = re.compile(r"^\+[1-9]\d{7,14}$")
 
 class SendPendingNotificationsJob:
-    """
-    Solo envía notificaciones con status='Pendiente' y scheduled_at <= NOW().
-    Sin menús, sin timers. Bucle con polling configurable desde main.
-    """
     def __init__(self, repo: NotificationRepository, sender: WhatsAppSender,
                  batch_size: int = 50, pause_sec: float = 0.25):
         self.repo = repo
@@ -22,19 +18,17 @@ class SendPendingNotificationsJob:
     def _is_e164(num: str) -> bool:
         return bool(E164_REGEX.fullmatch((num or "").strip()))
 
-    def run_once_due_only(self) -> None:
-        """
-        Procesa SOLO las vencidas (status='Pendiente' y scheduled_at<=NOW()).
-        Hace commit/rollback interno.
-        """
+    def run_once_due_only(self) -> int:
+        processed = 0
         try:
             rows: List[Dict] = self.repo.fetch_due_for_update(self.batch_size)
             if not rows:
                 self.repo.rollback()
                 print("[JOB] No hay PENDIENTE vencidas por ahora.")
-                return
+                return 0
 
             for r in rows:
+                processed += 1
                 print(f"[JOB] id={r['id']} → {r['phone_number']}")
                 try:
                     if not self._is_e164(r["phone_number"]):
@@ -51,8 +45,14 @@ class SendPendingNotificationsJob:
         except Exception as e:
             print(f"[JOB] FALLÓ LOTE: {e}")
             self.repo.rollback()
+        return processed
 
-    def run_forever(self, poll_sec: float = 10.0) -> None:
+    def run_until_empty_due(self) -> int:
+        total = 0
         while True:
-            self.run_once_due_only()
-            time.sleep(poll_sec)
+            n = self.run_once_due_only()
+            if n <= 0:
+                break
+            total += n
+        print(f"[JOB] Corrida diaria terminada. Total procesado: {total}")
+        return total

@@ -3,6 +3,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from app.domain.notification import Notification
 from app.ports.notification_repository import NotificationRepository
+from infra.config import env_str
 
 _INVISIBLES = ["\u202A", "\u202C", "\u200E", "\u200F", "\u2066", "\u2067", "\u2069", "\uFEFF"]
 
@@ -17,21 +18,18 @@ class PostgresNotificationRepository(NotificationRepository):
     def __init__(self, db_url: str):
         self.conn = psycopg2.connect(db_url)
         self.conn.autocommit = False
+        # Asegura comparaciones de fecha/hora coherentes con tu localidad
+        tz = env_str("TIMEZONE", "America/Mexico_City")
+        with self.conn.cursor() as cur:
+            cur.execute("SET TIME ZONE %s;", (tz,))
 
-    # ====== NUEVO: solo las PENDIENTE vencidas, con lock ======
     def fetch_due_for_update(self, limit: int) -> List[dict]:
-        """
-        Devuelve filas con:
-          - status = 'Pendiente'
-          - scheduled_at <= NOW()
-        Bloquea las filas tomadas para evitar doble envío.
-        Retorna dicts (no objetos Notification) para usar directamente.
-        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT id, phone_number, message, scheduled_at, status, sent_at
                   FROM notifications
                  WHERE status = 'Pendiente'
+                   AND scheduled_at IS NOT NULL
                    AND scheduled_at <= NOW()
                  ORDER BY scheduled_at ASC, id ASC
                  FOR UPDATE SKIP LOCKED
@@ -42,7 +40,6 @@ class PostgresNotificationRepository(NotificationRepository):
             r["phone_number"] = clean_phone(r.get("phone_number", ""))
         return rows
 
-    # ====== (Dejas esto si aún lo usas en otros lados) ======
     def list_pending(self, limit: int) -> List[Notification]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""

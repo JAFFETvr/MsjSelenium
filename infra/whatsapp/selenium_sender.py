@@ -11,6 +11,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 class SeleniumWhatsAppSender:
     def __init__(self, profile_dir: str, timeout: int = 20):
+        # Reduce verbosidad de webdriver_manager
+        os.environ.setdefault("WDM_LOG_LEVEL", "0")
         self.profile_dir = profile_dir
         self.profile_name = os.getenv("CHROME_PROFILE_NAME", "")
         self.timeout = timeout
@@ -24,12 +26,18 @@ class SeleniumWhatsAppSender:
             opts.add_argument(f"--profile-directory={self.profile_name}")
         if os.getenv("HEADLESS", "false").lower() in ("1","true","yes"):
             opts.add_argument("--headless=new")
+        # Silenciar Chrome
+        opts.add_argument("--disable-logging")
+        opts.add_argument("--log-level=3")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        opts.add_experimental_option("useAutomationExtension", False)
         opts.add_argument("--disable-notifications")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-        opts.add_experimental_option("useAutomationExtension", False)
-        service = Service(ChromeDriverManager().install())
+
+        # Silenciar logs del Service
+        service = Service(ChromeDriverManager().install(), log_output=os.devnull)
+
         driver = webdriver.Chrome(service=service, options=opts)
         driver.set_window_size(1280, 900)
         driver.set_page_load_timeout(self.timeout)
@@ -46,7 +54,6 @@ class SeleniumWhatsAppSender:
         time.sleep(1.0)
 
     def _textbox(self):
-        # Editor clásico (role='textbox'); en la UI nueva sigue existiendo como wrapper
         return WebDriverWait(self.driver, self.timeout+10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='textbox']"))
         )
@@ -77,18 +84,15 @@ class SeleniumWhatsAppSender:
         return len(self.driver.find_elements(By.CSS_SELECTOR, "div.message-out"))
 
     def _wait_sent_confirmation(self, before_count: int, timeout_extra: int = 0):
-        """Espera a que aumenten las burbujas salientes."""
         WebDriverWait(self.driver, self.timeout+15+timeout_extra).until(
             lambda d: self._count_outgoing() > before_count
         )
 
     def _handle_transient_modal(self):
-        """Tolera modales transitorios como 'Iniciando chat'; lanza error si es un modal real de fallo."""
         try:
             modal = self.driver.find_element(By.XPATH, "//div[contains(@data-animate-modal-body,'true')]")
             txt = (modal.text or "").strip().lower()
             if any(s in txt for s in ("iniciando chat", "starting chat", "open chat")):
-                # esperar textbox o que desaparezca el modal
                 try:
                     WebDriverWait(self.driver, self.timeout+15).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='textbox']"))
@@ -98,13 +102,11 @@ class SeleniumWhatsAppSender:
                         EC.presence_of_element_located((By.XPATH, "//div[contains(@data-animate-modal-body,'true')]"))
                     )
             else:
-                # otros modales sí indican error real (número sin cuenta, etc.)
                 raise RuntimeError(f"WhatsApp reporta problema: {modal.text.strip()}")
         except NoSuchElementException:
             pass
 
     def _click_send_or_enter(self):
-        """Intenta clic en botón Enviar; si no, ENTER en el textbox."""
         btn = self.driver.execute_script("""
             const q = (s)=>document.querySelector(s);
             return q("button[aria-label='Send']") 
@@ -120,11 +122,6 @@ class SeleniumWhatsAppSender:
             box.send_keys(Keys.ENTER)
 
     def send_text(self, phone_e164: str, body: str) -> str:
-        """
-        Envío con reintento sin duplicar:
-        - Si la confirmación tarda, antes de reintentar verificamos si YA se envió
-          (burbujas aumentaron o editor vacío). Solo si no hay señales, reintentamos una vez.
-        """
         last_exc = None
         for attempt in range(1, 3):
             try:
@@ -133,7 +130,6 @@ class SeleniumWhatsAppSender:
                 url = f"https://web.whatsapp.com/send?phone={phone_e164}&text={urllib.parse.quote(body or '')}"
                 self.driver.get(url)
 
-                # Espera textbox o modal (margen mayor por lentitud ocasional)
                 WebDriverWait(self.driver, self.timeout+20).until(
                     EC.any_of(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='textbox']")),
@@ -141,34 +137,25 @@ class SeleniumWhatsAppSender:
                     )
                 )
 
-                # Manejo modal transitorio / errores reales
                 self._handle_transient_modal()
-
-                # Asegura texto y cuenta antes de enviar
                 self._fill_text_if_missing(body or "")
                 before = self._count_outgoing()
-
-                # Enviar
                 self._click_send_or_enter()
 
-                # Confirmar envío (primer intento)
                 try:
                     self._wait_sent_confirmation(before)
                     time.sleep(0.2)
                     return f"selenium-{uuid.uuid4().hex[:12]}"
-                except TimeoutException as e:
-                    # Antes de reintentar, verifica si YA se envió:
+                except TimeoutException:
                     already_sent = (self._count_outgoing() > before) or self._is_editor_empty()
                     if already_sent:
-                        # Ya se envió, solo tardó la UI en reflejar (evita duplicado)
                         time.sleep(0.2)
                         return f"selenium-{uuid.uuid4().hex[:12]}"
-                    # Si no hay señales de envío, dejamos caer al except general para reintentar
                     raise
 
             except Exception as e:
                 last_exc = e
-                time.sleep(1.0)  # pequeña espera y reintento
+                time.sleep(1.0)
 
         raise last_exc if last_exc else RuntimeError("Fallo desconocido en send_text()")
 
