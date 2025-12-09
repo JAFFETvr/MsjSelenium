@@ -237,3 +237,4 @@ class SeleniumWhatsAppSender:
                 self.service.stop()
         except Exception:
             pass
+#holaa
